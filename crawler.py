@@ -1,7 +1,7 @@
 """Walk all Fusion Team projects in a normal Chrome and request the chosen exports per design.
 
-Every request is appended to manifest.jsonl (project, folder path, name) so fetch_emails.py can sort the
-emailed downloads into the original folder structure. On rerun only exports without a current file in export/
+Every request is appended to manifest.jsonl (project, folder path, name) so download_files_from_emails.py
+can sort the emailed downloads into the original folder structure. On rerun only exports without a current file in export/
 are requested: new designs, new formats, designs changed since their export, and requests that got no file
 within a day. With -v nothing is clicked; online designs are only compared with export/.
 """

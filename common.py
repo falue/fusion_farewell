@@ -1,4 +1,4 @@
-"""Shared by crawler.py and fetch_emails.py: where an export lives in export/ and what was requested."""
+"""Shared by crawler.py and download_files_from_emails.py: where an export lives in export/ and what was requested."""
 import json, re
 from pathlib import Path
 
