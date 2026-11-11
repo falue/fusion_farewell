@@ -4,7 +4,7 @@ Emails only name the file, so each one is matched against manifest.jsonl by name
 request made before the email that has no downloaded file yet. If every such request already has its file, the
 email is a duplicate and skipped. Unmatched files go to export/_unmatched. Safe to rerun.
 """
-import email, email.policy, html, json, random, re, time, urllib.parse, urllib.request
+import email, email.policy, html, json, re, urllib.parse, urllib.request
 from pathlib import Path
 from common import ROOT, KIND, UNMATCHED, safe, target, latest_requests, has_file
 
@@ -25,7 +25,7 @@ def parse(eml):
     return msg["Message-ID"] or eml.name, msg["Date"].datetime.timestamp(), url, name
 
 
-def main(pause=(0.5, 1.5), clock_slack=300):
+def main(clock_slack=300):
     state = json.loads(STATE.read_text()) if STATE.exists() else {}
     latest = latest_requests()
     save = lambda: STATE.write_text(json.dumps(state, indent=1, ensure_ascii=False))
@@ -67,7 +67,6 @@ def main(pause=(0.5, 1.5), clock_slack=300):
         state[mid] = {"file": str(dest.relative_to(ROOT)), "entry": [e["lineage"], e["kind"]] if e else None}
         save()
         print(f"{fname} -> {dest.relative_to(ROOT)}{note}")
-        time.sleep(random.uniform(*pause))
     missing = [f"{e['project']}/{'/'.join(e['path'] + [e['name']])} [{e['kind']}]"
                for e in sorted(latest.values(), key=lambda e: e["requested"]) if not has_file(e)]
     print(f"{len(missing)} requested exports still without file" + "".join(f"\n  {m}" for m in missing))
