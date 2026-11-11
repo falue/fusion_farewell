@@ -50,20 +50,6 @@ Formats for `-f` (several can be given, separated by spaces):
 
 On the first run, if no Chrome is listening on port 9222, the crawler starts one with `chrome_profile/`. Log in there, then press Enter. The login persists.
 
-## Output
-
-```
-  export pull switch -> ['archive', 'step']
-    archive: Download requested.
-    step: Download requested.
-  export test2 -> ['archive', 'step']
-    FAILED: Export button did not appear within 60 s
-
-== summary: 125 current, 78 pending (requested < 24 h ago, no file yet), 4 missing, 0 outdated; 4 documents exported, 1 failed
-FAILED (rerun to retry):
-  NINE/test2 ['archive', 'step']: Export button did not appear within 60 s
-```
-
 - `Download requested.` means the confirmation dialog showed the expected text. Any other dialog text is printed in full as `ERROR:` and listed under `UNEXPECTED DIALOG TEXT` in the summary.
 - `FAILED` documents are retried once at the end of the run. A screenshot of the page is saved in `logs/`.
 
