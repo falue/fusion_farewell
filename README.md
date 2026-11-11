@@ -47,6 +47,7 @@ Formats for `-f` (several can be given, separated by spaces):
 | `sketchup` | SketchUp          | `.skp`, `.zip`                  |
 | `obj`      | OBJ               | `.obj`, `.zip`                  |
 | `mp4`      | Export (on .mp4 files) | none, downloaded directly |
+| `png`      | Export (on .png files) | none, downloaded directly |
 | `all`      | all of the above  |                                 |
 
 On the first run, if no Chrome is listening on port 9222, the crawler starts one with `chrome_profile/`. Log in there, then press Enter. The login persists.

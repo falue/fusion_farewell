@@ -19,7 +19,7 @@ class Crawler:
     cdp_port = 9222
     formats = {"archive": "Fusion Archive", "inventor": "Inventor", "smt": "SMT", "step": "STEP", "stl": "STL",
                "fbx": "FBX", "sketchup": "SketchUp", "obj": "OBJ"}  # kind: export menu label
-    direct = {"mp4"}  # kinds of uploaded files whose Export button downloads them directly (kind = fileType)
+    direct = {"mp4", "png"}  # kinds of uploaded files whose Export button downloads them directly (kind = fileType)
     fusion_mime = "application/vnd.autodesk.fusion360"
     pause = (2.0, 4.0)          # seconds between clicks
     item_pause = (8.0, 15.0)    # seconds between documents
