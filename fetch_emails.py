@@ -4,8 +4,7 @@ Emails only name the file, so each one is matched against manifest.jsonl by name
 request made before the email that has no downloaded file yet. If every such request already has its file, the
 email is a duplicate and skipped. Unmatched files go to export/_unmatched. Safe to rerun.
 """
-import email, email.policy, html, json, re, urllib.parse, urllib.request
-from pathlib import Path
+import email, email.policy, html, json, os, re, urllib.parse, urllib.request
 from common import ROOT, KIND, UNMATCHED, safe, target, latest_requests, has_file
 
 EMAILS, STATE = ROOT / "emails", ROOT / "downloads.json"
@@ -33,7 +32,8 @@ def main(clock_slack=300):
     for mid, sent, url, fname in sorted(mails, key=lambda m: m[1]):
         if mid in state:
             continue
-        stem, ext = Path(fname).stem, Path(fname).suffix.lower()
+        stem, ext = os.path.splitext(fname)  # not Path: design names may contain "/"
+        ext = ext.lower()
         named = sorted((e for e in latest.values() if e["kind"] in KIND.get(ext, ())
                         and e["name"].casefold() == stem.casefold() and e["requested"] <= sent + clock_slack),
                        key=lambda e: e["requested"])
