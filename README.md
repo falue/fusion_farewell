@@ -65,26 +65,6 @@ FAILED (rerun to retry):
 - `Download requested.` means the confirmation dialog showed the expected text. Any other dialog text is printed in full as `ERROR:` and listed under `UNEXPECTED DIALOG TEXT` in the summary.
 - `FAILED` documents are retried once at the end of the run. A screenshot of the page is saved in `logs/`.
 
-## Timing
-
-Random pauses (class attributes in `Crawler`):
-
-| When | Duration | Setting |
-|---|---|---|
-| before each click (Export, format, OK) and after OK | 2–4 s | `pause` |
-| after each exported document | 8–15 s | `item_pause` |
-| before opening each subfolder | 2–4 s | `pause` |
-
-Waits for the site (as short as the page allows, these are timeouts):
-
-| What | Up to |
-|---|---|
-| page load | 90 s |
-| Export button visible | 60 s |
-| confirmation dialog | 30 s |
-| folder content (checked every 1.5 s) | 60 s |
-
-Designs that are already current are skipped without any pause.
 
 ## Notes
 
