@@ -30,7 +30,9 @@ python3 fetch_emails.py              # download what has arrived in emails/
 python3 crawler.py -v archive step   # verify: compare online designs with export/, click nothing
 ```
 
-Verify lists: missing, outdated (changed online since the export), pending (requested, file not here yet), extra (in `export/` but not online, e.g. renamed or deleted), and same-name designs in one folder. It exits with code 1 if anything is missing or outdated.
+Verify lists: missing, outdated (changed online since the export), pending (requested, file not here yet), extra (in `export/` but not online, e.g. renamed or deleted), and same-name designs in one folder. It exits with code 1 if anything is missing or outdated. It accepts the same format names as `-f` (including `all`) and can be combined with `-p` to check one project.
+
+`-n` counts only documents that actually get an export request; already current ones don't count.
 
 Formats for `-f` (several can be given, separated by spaces):
 
@@ -64,6 +66,8 @@ FAILED (rerun to retry):
 
 - `Download requested.` means the confirmation dialog showed the expected text. Any other dialog text is printed in full as `ERROR:` and listed under `UNEXPECTED DIALOG TEXT` in the summary.
 - `FAILED` documents are retried once at the end of the run. A screenshot of the page is saved in `logs/`.
+
+`fetch_emails.py` prints one line per email (`<file> -> export/...`, `skip <file>: already downloaded`, `(ambiguous ...)`, `(no manifest match)`) and ends with the requested exports that still have no file.
 
 
 ## Notes
