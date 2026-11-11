@@ -38,7 +38,7 @@ Formats for `-f` (several can be given, separated by spaces):
 
 | `-f` name  | Export menu entry | Email file matched by           |
 |------------|-------------------|---------------------------------|
-| `archive`  | Fusion Archive (designs and drawings) | `.f3d`, `.f3z`, `.f2d` |
+| `archive`  | Fusion Archive    | `.f3d`, `.f3z`                  |
 | `inventor` | Inventor 2025     | `.ipt`, `.iam`, `.zip`          |
 | `smt`      | SMT               | `.smt`                          |
 | `step`     | STEP              | `.stp`, `.step`                 |
@@ -46,6 +46,9 @@ Formats for `-f` (several can be given, separated by spaces):
 | `fbx`      | FBX               | `.fbx`, `.zip`                  |
 | `sketchup` | SketchUp          | `.skp`, `.zip`                  |
 | `obj`      | OBJ               | `.obj`, `.zip`                  |
+| `f2d`      | Fusion Archive (on drawings) | `.f2d` |
+| `pdf`      | PDF (on drawings, paid plan) | `.pdf`, or downloaded directly |
+| `dwg`      | DWG (on drawings, paid plan) | `.dwg`, or downloaded directly |
 | `mp4`      | Export (on .mp4 files) | none, downloaded directly |
 | `png`      | Export (on .png files) | none, downloaded directly |
 | `all`      | all of the above  |                                 |
@@ -61,7 +64,7 @@ On the first run, if no Chrome is listening on port 9222, the crawler starts one
 ## Notes
 
 - Archived projects are not crawled. Restore them in Fusion Team first (All Projects → Archived → Restore), then rerun.
-- Only Fusion designs (`application/vnd.autodesk.fusion360`) and, with `-f mp4 png`, uploaded `.mp4`/`.png` files are handled. Other files are logged as `skip` and not downloaded.
+- Only Fusion designs, drawings (`-f f2d pdf dwg`) and uploaded `.mp4`/`.png` files (`-f mp4 png`) are handled. Other files are logged as `skip` and not downloaded.
 - Email links expire after 7 days.
 - Only `.stp`, `.f3d` and `.f3z` emails have been seen so far. The file extensions for the other formats in `fetch_emails.py` (`KIND`) are guesses. A `.zip` can belong to Inventor, STL, FBX, SketchUp or OBJ, so it's matched to the oldest open request of any of these and saved as `<name>.<kind>.zip`.
 - Folders with more than 30 entries are loaded by scrolling; a `WARNING: listed x of y` line means paging didn't finish.

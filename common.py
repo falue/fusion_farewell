@@ -6,7 +6,7 @@ ROOT = Path(__file__).parent
 EXPORT, MANIFEST = ROOT / "export", ROOT / "manifest.jsonl"
 UNMATCHED = EXPORT / "_unmatched"
 # email file extension -> possible export kinds; only .stp and .f3d were seen in real emails so far
-KIND = {".stp": {"step"}, ".step": {"step"}, ".f3d": {"archive"}, ".f3z": {"archive"}, ".f2d": {"archive"}, ".smt": {"smt"},
+KIND = {".stp": {"step"}, ".step": {"step"}, ".f3d": {"archive"}, ".f3z": {"archive"}, ".f2d": {"f2d"}, ".pdf": {"pdf"}, ".dwg": {"dwg"}, ".smt": {"smt"},
         ".ipt": {"inventor"}, ".iam": {"inventor"}, ".stl": {"stl"}, ".fbx": {"fbx"}, ".skp": {"sketchup"},
         ".obj": {"obj"}, ".zip": {"inventor", "stl", "fbx", "sketchup", "obj"}, ".mp4": {"mp4"}, ".png": {"png"}}
 

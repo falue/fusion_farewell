@@ -5,7 +5,7 @@ emailed downloads into the original folder structure. On rerun only exports with
 are requested: new designs, new formats, designs changed since their export, and requests that got no file
 within a day. With -v nothing is clicked; online designs are only compared with export/.
 """
-import argparse, asyncio, base64, difflib, json, random, re, subprocess, sys, time, urllib.request
+import argparse, asyncio, base64, difflib, json, os, random, re, subprocess, sys, time, urllib.request
 from collections import Counter
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
 from common import ROOT, EXPORT, UNMATCHED, KIND, MANIFEST, safe, stem, target, existing, latest_requests
@@ -18,7 +18,8 @@ class Crawler:
     logs = ROOT / "logs"  # screenshots of failed documents
     cdp_port = 9222
     formats = {"archive": "Fusion Archive", "inventor": "Inventor", "smt": "SMT", "step": "STEP", "stl": "STL",
-               "fbx": "FBX", "sketchup": "SketchUp", "obj": "OBJ"}  # kind: export menu label
+               "fbx": "FBX", "sketchup": "SketchUp", "obj": "OBJ"}  # design kind: export menu label
+    drawing_formats = {"f2d": "Fusion Archive", "pdf": "PDF", "dwg": "DWG"}  # PDF/DWG need a paid plan
     direct = {"mp4", "png"}  # kinds of uploaded files whose Export button downloads them directly (kind = fileType)
     fusion_mime = "application/vnd.autodesk.fusion360"
     pause = (2.0, 4.0)          # seconds between clicks
@@ -166,9 +167,9 @@ class Crawler:
     def applicable(self, f, ftype):
         """Kinds selected with -f that this file supports."""
         if f.get("mimeType") == self.fusion_mime:
-            return [k for k in self.kinds if k not in self.direct]
-        if ftype == "f2d":  # drawings only offer Fusion Archive (DWG/PDF need a paid plan)
-            return [k for k in self.kinds if k == "archive"]
+            return [k for k in self.kinds if k in self.formats]
+        if ftype == "f2d":
+            return [k for k in self.kinds if k in self.drawing_formats]
         return [ftype] if ftype in self.direct and ftype in self.kinds else []
 
     async def walk(self, p, folder_urn, path):
@@ -215,7 +216,7 @@ class Crawler:
             if kinds[0] in self.direct:
                 await self.download(p, folder_urn, path, f, fstem, kinds)
             else:
-                await self.export(p, folder_urn, path, f, kinds)
+                await self.export(p, folder_urn, path, f, fstem, kinds)
         except Exception as e:
             reason = str(e).splitlines()[0]
             print(f"    FAILED: {reason}")
@@ -243,22 +244,42 @@ class Crawler:
         trigger = await self.open_export(p, folder_urn, f)
         async with self.page.expect_download(timeout=60000) as info:
             await trigger.click()
-        dest = target(p["name"], path, fstem, kinds[0], "." + kinds[0])
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dest.with_name(dest.name + ".part")
-        await (await info.value).save_as(tmp)
-        tmp.replace(dest)
-        print(f"    {kinds[0]}: downloaded -> {dest.relative_to(ROOT)}")
+        await self.save(await info.value, p, path, fstem, kinds[0])
         kinds.clear()
 
-    async def export(self, p, folder_urn, path, f, kinds):
+    async def save(self, download, p, path, fstem, kind):
+        """Store a browser download in export/ under the file's name, with the download's extension."""
+        ext = os.path.splitext(download.suggested_filename)[1].lower() or "." + kind
+        dest = target(p["name"], path, fstem, kind, ext)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(dest.name + ".part")
+        await download.save_as(tmp)
+        tmp.replace(dest)
+        print(f"    {kind}: downloaded -> {dest.relative_to(ROOT)}")
+
+    async def dialog_or_download(self, ok, kind):
+        """After choosing a format: email confirmation dialog (returns None) or direct download (returns it)."""
+        dl = asyncio.ensure_future(self.page.wait_for_event("download", timeout=30000))
+        dlg = asyncio.ensure_future(ok.wait_for(timeout=30000))
+        pending = {dl, dlg}
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for t in done:
+                if not t.exception():
+                    for other in pending:
+                        other.cancel()
+                    return t.result() if t is dl else None
+        raise RuntimeError(f"{kind}: neither confirmation dialog nor download within 30 s")
+
+    async def export(self, p, folder_urn, path, f, fstem, kinds):
         """Request each format in kinds; requested ones are removed from kinds, so a retry only does the rest."""
         print(f"  export {'/'.join(path + [f['name']])} -> {kinds}")
         trigger = await self.open_export(p, folder_urn, f)
         for kind in list(kinds):
             await trigger.click()
             await self.sleep()
-            option = self.page.locator(".export-format").locator("visible=true").filter(has_text=self.formats[kind]).first
+            label = {**self.formats, **self.drawing_formats}[kind]
+            option = self.page.locator(".export-format").locator("visible=true").filter(has_text=label).first
             if await option.locator(".disabled").count():
                 print(f"    {kind}: format disabled, skipped")
                 await self.page.keyboard.press("Escape")
@@ -266,10 +287,11 @@ class Crawler:
                 continue
             await option.click()
             ok = self.page.locator("[it-id=alert-confirm]").locator("visible=true")
-            try:
-                await ok.wait_for(timeout=30000)
-            except PlaywrightTimeout:
-                raise RuntimeError(f"{kind}: confirmation dialog did not appear within 30 s") from None
+            if download := await self.dialog_or_download(ok, kind):
+                await self.save(download, p, path, fstem, kind)
+                kinds.remove(kind)
+                await self.sleep()
+                continue
             msg = " ".join((await self.page.locator(".modal-body").locator("visible=true").inner_text()).split())
             m = self.confirmation.fullmatch(msg)
             if m and m.group(1) == f["name"]:
@@ -319,12 +341,13 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("-n", "--limit", type=int, help="export at most N documents this run")
     ap.add_argument("-p", "--project", help="only this project (exact name)")
-    choices = [*Crawler.formats, *Crawler.direct, "all"]
+    every = [*Crawler.formats, *Crawler.drawing_formats, *Crawler.direct]
+    choices = [*every, "all"]
     ap.add_argument("-f", "--formats", nargs="+", choices=choices, default=["archive", "step"],
                     help="formats to export, or 'all' (default: archive step)")
     ap.add_argument("-v", "--verify", nargs="+", choices=choices, metavar="FORMAT",
                     help="only compare these formats online vs export/, click nothing")
     a = ap.parse_args()
     fmts = a.verify or a.formats
-    kinds = [*Crawler.formats, *Crawler.direct] if "all" in fmts else fmts
+    kinds = every if "all" in fmts else fmts
     sys.exit(asyncio.run(Crawler(a.limit, a.project, kinds, bool(a.verify)).run()))
