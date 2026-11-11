@@ -22,7 +22,7 @@ Failed documents are retried once at the end of the run, with a screenshot in `l
 
 ```bash
 python3 crawler.py -n 3              # test: first 3 documents
-python3 crawler.py -p "My Project"   # one project only (exact name; a typo gets a "did you mean" hint)
+python3 crawler.py -p "My Project"   # one project only
 python3 crawler.py                   # everything (Fusion Archive + STEP)
 python3 crawler.py -f archive smt    # choose formats: archive inventor smt step stl fbx sketchup obj
 python3 crawler.py -f all            # all of them
@@ -46,6 +46,7 @@ Formats for `-f` (several can be given, separated by spaces):
 | `fbx`      | FBX               | `.fbx`, `.zip`                  |
 | `sketchup` | SketchUp          | `.skp`, `.zip`                  |
 | `obj`      | OBJ               | `.obj`, `.zip`                  |
+| `mp4`      | Export (on .mp4 files) | none, downloaded directly |
 | `all`      | all of the above  |                                 |
 
 On the first run, if no Chrome is listening on port 9222, the crawler starts one with `chrome_profile/`. Log in there, then press Enter. The login persists.

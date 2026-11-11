@@ -8,7 +8,7 @@ within a day. With -v nothing is clicked; online designs are only compared with 
 import argparse, asyncio, base64, difflib, json, random, re, subprocess, sys, time, urllib.request
 from collections import Counter
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
-from common import ROOT, EXPORT, UNMATCHED, KIND, MANIFEST, safe, stem, existing, latest_requests
+from common import ROOT, EXPORT, UNMATCHED, KIND, MANIFEST, safe, stem, target, existing, latest_requests
 
 
 class Crawler:
@@ -19,6 +19,7 @@ class Crawler:
     cdp_port = 9222
     formats = {"archive": "Fusion Archive", "inventor": "Inventor", "smt": "SMT", "step": "STEP", "stl": "STL",
                "fbx": "FBX", "sketchup": "SketchUp", "obj": "OBJ"}  # kind: export menu label
+    direct = {"mp4"}  # kinds of uploaded files whose Export button downloads them directly (kind = fileType)
     fusion_mime = "application/vnd.autodesk.fusion360"
     pause = (2.0, 4.0)          # seconds between clicks
     item_pause = (8.0, 15.0)    # seconds between documents
@@ -158,21 +159,26 @@ class Crawler:
     async def walk(self, p, folder_urn, path):
         folders, files = await self.list_folder(p["id"], folder_urn)
         print(f"  [{'/'.join(path) or '/'}] {len(folders)} folders, {len(files)} files")
-        designs = [f for f in files if f.get("mimeType") == self.fusion_mime]
+        handled = []  # (file, kinds that apply to it, name stem)
         for f in files:
-            if f not in designs:
-                print(f"  skip (not a Fusion design): {'/'.join(path + [f['name']])} [{f.get('fileType')}]")
-        names = Counter(f["name"].casefold() for f in designs)
-        for n, c in names.items():
+            ftype = (f.get("fileType") or "").lower()
+            kinds = [k for k in self.kinds if k not in self.direct] if f.get("mimeType") == self.fusion_mime \
+                else [ftype] if ftype in self.direct and ftype in self.kinds else []
+            if kinds:
+                handled.append((f, kinds, re.sub(rf"\.{ftype}$", "", f["name"], flags=re.I) if ftype in self.direct else f["name"]))
+            else:
+                print(f"  skip: {'/'.join(path + [f['name']])} [{ftype}]")
+        names = Counter((kinds[0] in self.direct, n.casefold()) for _, kinds, n in handled)
+        for (_, n), c in names.items():
             if c > 1:
-                self.issues["collision"].append(f"{p['name']}/{'/'.join(path + [n])} ({c} designs, files get an id suffix)")
-        for f in designs:
+                self.issues["collision"].append(f"{p['name']}/{'/'.join(path + [n])} ({c} files, they get an id suffix)")
+        for f, kinds, name in handled:
             if self.capped():
                 return
-            fstem = stem(f["name"], f["id"], names[f["name"].casefold()] > 1)
+            fstem = stem(name, f["id"], names[kinds[0] in self.direct, name.casefold()] > 1)
             label = f"{p['name']}/{'/'.join(path + [f['name']])}"
             todo = []
-            for kind in self.kinds:
+            for kind in kinds:
                 s = self.status(p["name"], path, f, fstem, kind)
                 self.states[s] += 1
                 if s != "current":
@@ -191,9 +197,12 @@ class Crawler:
             await self.walk(p, sub["id"], path + [sub["name"]])
 
     async def export_logged(self, p, folder_urn, path, f, fstem, kinds):
-        """Export, but record a failure (with screenshot) instead of stopping the run."""
+        """Export or download, but record a failure (with screenshot) instead of stopping the run."""
         try:
-            await self.export(p, folder_urn, path, f, kinds)
+            if kinds[0] in self.direct:
+                await self.download(p, folder_urn, path, f, fstem, kinds)
+            else:
+                await self.export(p, folder_urn, path, f, kinds)
         except Exception as e:
             reason = str(e).splitlines()[0]
             print(f"    FAILED: {reason}")
@@ -204,9 +213,8 @@ class Crawler:
                 pass
             self.failed.append((p, folder_urn, path, f, fstem, kinds, reason))
 
-    async def export(self, p, folder_urn, path, f, kinds):
-        """Request each format in kinds; requested ones are removed from kinds, so a retry only does the rest."""
-        print(f"  export {'/'.join(path + [f['name']])} -> {kinds}")
+    async def open_export(self, p, folder_urn, f):
+        """Open the file's page and return its visible Export button."""
         await self.goto(f"{self.hub_url}/g/projects/{p['id']}/data/{self.b64(folder_urn)}/{self.b64(f['id'])}/overview")
         trigger = self.page.locator("[it-id=export-dropdown-trigger]").locator("visible=true")
         try:
@@ -214,6 +222,26 @@ class Crawler:
         except PlaywrightTimeout:
             raise RuntimeError("Export button did not appear within 60 s") from None
         await self.sleep()
+        return trigger
+
+    async def download(self, p, folder_urn, path, f, fstem, kinds):
+        """Uploaded file: the Export button downloads it directly into export/."""
+        print(f"  download {'/'.join(path + [f['name']])}")
+        trigger = await self.open_export(p, folder_urn, f)
+        async with self.page.expect_download(timeout=60000) as info:
+            await trigger.click()
+        dest = target(p["name"], path, fstem, kinds[0], "." + kinds[0])
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(dest.name + ".part")
+        await (await info.value).save_as(tmp)
+        tmp.replace(dest)
+        print(f"    {kinds[0]}: downloaded -> {dest.relative_to(ROOT)}")
+        kinds.clear()
+
+    async def export(self, p, folder_urn, path, f, kinds):
+        """Request each format in kinds; requested ones are removed from kinds, so a retry only does the rest."""
+        print(f"  export {'/'.join(path + [f['name']])} -> {kinds}")
+        trigger = await self.open_export(p, folder_urn, f)
         for kind in list(kinds):
             await trigger.click()
             await self.sleep()
@@ -278,12 +306,12 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("-n", "--limit", type=int, help="export at most N documents this run")
     ap.add_argument("-p", "--project", help="only this project (exact name)")
-    choices = [*Crawler.formats, "all"]
+    choices = [*Crawler.formats, *Crawler.direct, "all"]
     ap.add_argument("-f", "--formats", nargs="+", choices=choices, default=["archive", "step"],
                     help="formats to export, or 'all' (default: archive step)")
     ap.add_argument("-v", "--verify", nargs="+", choices=choices, metavar="FORMAT",
                     help="only compare these formats online vs export/, click nothing")
     a = ap.parse_args()
     fmts = a.verify or a.formats
-    kinds = list(Crawler.formats) if "all" in fmts else fmts
+    kinds = [*Crawler.formats, *Crawler.direct] if "all" in fmts else fmts
     sys.exit(asyncio.run(Crawler(a.limit, a.project, kinds, bool(a.verify)).run()))
