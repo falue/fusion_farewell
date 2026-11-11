@@ -61,8 +61,7 @@ On the first run, if no Chrome is listening on port 9222, the crawler starts one
 ## Notes
 
 - Archived projects are not crawled. Restore them in Fusion Team first (All Projects → Archived → Restore), then rerun.
-
-- Only Fusion designs (`application/vnd.autodesk.fusion360`) are exported. Other files are logged as `skip` and not downloaded.
+- Only Fusion designs (`application/vnd.autodesk.fusion360`) and, with `-f mp4 png`, uploaded `.mp4`/`.png` files are handled. Other files are logged as `skip` and not downloaded.
 - Email links expire after 7 days.
 - Only `.stp`, `.f3d` and `.f3z` emails have been seen so far. The file extensions for the other formats in `fetch_emails.py` (`KIND`) are guesses. A `.zip` can belong to Inventor, STL, FBX, SketchUp or OBJ, so it's matched to the oldest open request of any of these and saved as `<name>.<kind>.zip`.
 - Folders with more than 30 entries are loaded by scrolling; a `WARNING: listed x of y` line means paging didn't finish.
