@@ -6,9 +6,9 @@ Requests exports (Fusion Archive, STEP, … see `-f`) of every Fusion design in 
 
 ## How it works
 
-1. `crawler.py` drives a normal Chrome (started with only a debug port, so no captcha loop). It walks every project and folder by URL, opens each design, and clicks Export → <format> → OK for each chosen format. It reads the project and folder lists from the responses the page loads itself. Each request is appended to `manifest.jsonl` with project, folder path and name.
+1. `crawler.py` drives a normal Chrome. It walks every project and folder by URL, opens each design, and clicks Export → `<format>` → OK for each chosen format. It reads the project and folder lists from the responses the page loads itself. Each request is appended to `manifest.jsonl` with project, folder path and name.
 2. Autodesk emails a link for every export. Save those emails as `.eml` into `emails/`.
-3. `fetch_emails.py` reads the emails and matches each file name against the manifest. An email fills the oldest request made before it that has no file yet; if all such requests already have their file, the email is a duplicate and skipped. It downloads to `export/<project>/<folders>/<file>`, with a 0.5–1.5 s pause between files. Files it can't match go to `export/_unmatched/`. Processed emails are tracked by Message-ID in `downloads.json`.
+3. `fetch_emails.py` reads the emails and matches each file name against the manifest. An email fills the oldest request made before it that has no file yet; if all such requests already have their file, the email is a duplicate and skipped. It downloads to `export/<project>/<folders>/<file>`. Files it can't match go to `export/_unmatched/`. Processed emails are tracked by Message-ID in `downloads.json`.
 
 Both scripts are safe to rerun. The crawler only requests an export when `export/` has no current file for it:
 - new designs, folders or projects online
@@ -59,6 +59,8 @@ On the first run, if no Chrome is listening on port 9222, the crawler starts one
 
 
 ## Notes
+
+- Archived projects are not crawled. Restore them in Fusion Team first (All Projects → Archived → Restore), then rerun.
 
 - Only Fusion designs (`application/vnd.autodesk.fusion360`) are exported. Other files are logged as `skip` and not downloaded.
 - Email links expire after 7 days.

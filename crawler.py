@@ -50,8 +50,11 @@ class Crawler:
 
     def ensure_chrome(self):
         """Start a plain Chrome (no automation flags, so no captcha loop) unless one is already listening."""
+        base = f"http://127.0.0.1:{self.cdp_port}"
         try:
-            urllib.request.urlopen(f"http://127.0.0.1:{self.cdp_port}/json/version", timeout=2)
+            tabs = json.load(urllib.request.urlopen(f"{base}/json/list", timeout=2))
+            if not any(t["type"] == "page" for t in tabs):  # Chrome without window: attaching would fail
+                urllib.request.urlopen(urllib.request.Request(f"{base}/json/new?about:blank", method="PUT"), timeout=5)
             return
         except OSError:
             pass
