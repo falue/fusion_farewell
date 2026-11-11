@@ -22,7 +22,7 @@ Failed documents are retried once at the end of the run, with a screenshot in `l
 
 ```bash
 python3 crawler.py -n 3              # test: first 3 documents
-python3 crawler.py -p "My Project"   # one project only
+python3 crawler.py -p "My Project"   # one project only (exact name; a typo gets a "did you mean" hint)
 python3 crawler.py                   # everything (Fusion Archive + STEP)
 python3 crawler.py -f archive smt    # choose formats: archive inventor smt step stl fbx sketchup obj
 python3 crawler.py -f all            # all of them

@@ -5,7 +5,7 @@ emailed downloads into the original folder structure. On rerun only exports with
 are requested: new designs, new formats, designs changed since their export, and requests that got no file
 within a day. With -v nothing is clicked; online designs are only compared with export/.
 """
-import argparse, asyncio, base64, json, random, re, subprocess, sys, time, urllib.request
+import argparse, asyncio, base64, difflib, json, random, re, subprocess, sys, time, urllib.request
 from collections import Counter
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
 from common import ROOT, EXPORT, UNMATCHED, KIND, MANIFEST, safe, stem, existing, latest_requests
@@ -81,9 +81,7 @@ class Crawler:
                 await asyncio.sleep(8)
                 projects = sorted(self.projects.values(), key=lambda p: p["name"].lower())
                 print(f"{len(projects)} projects found")
-                for p in projects:
-                    if self.only_project and p["name"] != self.only_project:
-                        continue
+                for p in self.pick(projects):
                     print(f"== {p['name']}")
                     await self.walk(p, p["data"]["urn"], [])
                     if self.capped():
@@ -96,9 +94,24 @@ class Crawler:
                 if self.verify:
                     self.find_extra()
             finally:
-                self.summary()
+                if self.states:  # skip after a wrong -p, nothing ran
+                    self.summary()
                 await self.page.close()
         return 1 if self.verify and (self.issues["missing"] or self.issues["outdated"]) else 0
+
+    def pick(self, projects):
+        """Projects selected by -p (exact name); suggests similar names if there is none."""
+        if not self.only_project:
+            return projects
+        hits = [p for p in projects if p["name"] == self.only_project]
+        if not hits:
+            key = lambda s: "".join(s.split()).casefold()
+            names = {key(p["name"]): p["name"] for p in projects}
+            close = difflib.get_close_matches(key(self.only_project), names, n=3, cutoff=0.6)
+            print(f'no project named "{self.only_project}"'
+                  + (f"; did you mean {' or '.join(repr(names[c]) for c in close)}?" if close else ""))
+            raise SystemExit(2)
+        return hits
 
     def capped(self):
         return self.limit is not None and self.exported >= self.limit
