@@ -98,7 +98,7 @@ class Crawler:
                 if self.failed:
                     print(f"== retrying {len(self.failed)} failed documents")
                     retry, self.failed = self.failed, []
-                    for args in retry:
+                    for *args, _reason in retry:
                         await self.export_logged(*args)
                 if self.verify:
                     self.find_extra()
