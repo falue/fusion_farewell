@@ -20,7 +20,7 @@ class Crawler:
     formats = {"archive": "Fusion Archive", "inventor": "Inventor", "smt": "SMT", "step": "STEP", "stl": "STL",
                "fbx": "FBX", "sketchup": "SketchUp", "obj": "OBJ"}  # design kind: export menu label
     drawing_formats = {"f2d": "Fusion Archive", "pdf": "PDF", "dwg": "DWG"}  # PDF/DWG need a paid plan
-    direct = {"mp4", "png"}  # kinds of uploaded files whose Export button downloads them directly (kind = fileType)
+    direct = {"mp4", "png"}  # kinds of uploaded files with a Download button (kind = fileType)
     fusion_mime = "application/vnd.autodesk.fusion360"
     pause = (2.0, 4.0)          # seconds between clicks
     item_pause = (8.0, 15.0)    # seconds between documents
@@ -227,21 +227,21 @@ class Crawler:
                 pass
             self.failed.append((p, folder_urn, path, f, fstem, kinds, reason))
 
-    async def open_export(self, p, folder_urn, f):
-        """Open the file's page and return its visible Export button."""
+    async def open_button(self, p, folder_urn, f, it_id="export-dropdown-trigger", label="Export"):
+        """Open the file's page and return its visible Export (designs) or Download (uploaded files) button."""
         await self.goto(f"{self.hub_url}/g/projects/{p['id']}/data/{self.b64(folder_urn)}/{self.b64(f['id'])}/overview")
-        trigger = self.page.locator("[it-id=export-dropdown-trigger]").locator("visible=true")
+        trigger = self.page.locator(f"[it-id={it_id}]").locator("visible=true")
         try:
             await trigger.wait_for(timeout=60000)
         except PlaywrightTimeout:
-            raise RuntimeError("Export button did not appear within 60 s") from None
+            raise RuntimeError(f"{label} button did not appear within 60 s") from None
         await self.sleep()
         return trigger
 
     async def download(self, p, folder_urn, path, f, fstem, kinds):
-        """Uploaded file: the Export button downloads it directly into export/."""
+        """Uploaded file: its Download button downloads it directly into export/."""
         print(f"  download {'/'.join(path + [f['name']])}")
-        trigger = await self.open_export(p, folder_urn, f)
+        trigger = await self.open_button(p, folder_urn, f, "download-trigger", "Download")
         async with self.page.expect_download(timeout=60000) as info:
             await trigger.click()
         await self.save(await info.value, p, path, fstem, kinds[0])
@@ -274,7 +274,7 @@ class Crawler:
     async def export(self, p, folder_urn, path, f, fstem, kinds):
         """Request each format in kinds; requested ones are removed from kinds, so a retry only does the rest."""
         print(f"  export {'/'.join(path + [f['name']])} -> {kinds}")
-        trigger = await self.open_export(p, folder_urn, f)
+        trigger = await self.open_button(p, folder_urn, f)
         for kind in list(kinds):
             await trigger.click()
             await self.sleep()

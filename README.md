@@ -49,8 +49,8 @@ Formats for `-f` (several can be given, separated by spaces):
 | `f2d`      | Fusion Archive (on drawings) | `.f2d` |
 | `pdf`      | PDF (on drawings, paid plan) | `.pdf`, or downloaded directly |
 | `dwg`      | DWG (on drawings, paid plan) | `.dwg`, or downloaded directly |
-| `mp4`      | Export (on .mp4 files) | none, downloaded directly |
-| `png`      | Export (on .png files) | none, downloaded directly |
+| `mp4`      | Download (on .mp4 files) | none, downloaded directly |
+| `png`      | Download (on .png files) | none, downloaded directly |
 | `all`      | all of the above  |                                 |
 
 On the first run, if no Chrome is listening on port 9222, the crawler starts one with `chrome_profile/`. Log in there, then press Enter. The login persists.
