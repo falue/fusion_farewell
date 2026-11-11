@@ -1,39 +1,44 @@
 """Walk all Fusion Team projects in a normal Chrome and request the chosen exports per design.
 
 Every request is appended to manifest.jsonl (project, folder path, name) so fetch_emails.py can sort the
-emailed downloads into the original folder structure. Already requested items are skipped on rerun.
+emailed downloads into the original folder structure. On rerun only exports without a current file in export/
+are requested: new designs, new formats, designs changed since their export, and requests that got no file
+within a day. With -v nothing is clicked; online designs are only compared with export/.
 """
-import argparse, asyncio, base64, json, random, subprocess, time, urllib.request
-from pathlib import Path
-from playwright.async_api import async_playwright
-
-ROOT = Path(__file__).parent
-MANIFEST = ROOT / "manifest.jsonl"
+import argparse, asyncio, base64, json, random, re, subprocess, sys, time, urllib.request
+from collections import Counter
+from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
+from common import ROOT, EXPORT, UNMATCHED, KIND, MANIFEST, safe, stem, existing, latest_requests
 
 
 class Crawler:
     hub_url = "https://filmkulissen.autodesk360.com"
     chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     profile = ROOT / "chrome_profile"
+    logs = ROOT / "logs"  # screenshots of failed documents
     cdp_port = 9222
     formats = {"archive": "Fusion Archive", "inventor": "Inventor", "smt": "SMT", "step": "STEP", "stl": "STL",
                "fbx": "FBX", "sketchup": "SketchUp", "obj": "OBJ"}  # kind: export menu label
     fusion_mime = "application/vnd.autodesk.fusion360"
-    pause = (2.0, 4.0)        # seconds between clicks
-    item_pause = (8.0, 15.0)  # seconds between documents
+    pause = (2.0, 4.0)          # seconds between clicks
+    item_pause = (8.0, 15.0)    # seconds between documents
+    retry_after = 24 * 3600     # seconds before a request without downloaded file is sent again
+    confirmation = re.compile(r"(.+) is being exported to .+? format\. We will send you an email with a link to the "
+                              r"exported file once the process is complete\. Note: The link will be active for a "
+                              r"period of 7 days from the time you receive the email\.")
+
+    def __init__(self, limit, only_project, kinds, verify):
+        self.limit, self.only_project, self.kinds, self.verify = limit, only_project, kinds, verify
+        self.exported = 0
+        self.requests = latest_requests()
+        self.states = Counter()              # status of each (design, format)
+        self.issues = {"missing": [], "outdated": [], "pending": [], "collision": [], "extra": []}
+        self.failed, self.errors = [], []    # documents that raised, dialogs with unexpected text
+        self.found = set()                   # files in export/ that belong to an online design
+        self.projects, self.contents = {}, []
 
     async def goto(self, url):
         await self.page.goto(url, wait_until="domcontentloaded", timeout=90000)
-
-    def __init__(self, limit, only_project, kinds):
-        self.limit, self.only_project, self.kinds = limit, only_project, kinds
-        self.exported = 0
-        self.done = set()
-        if MANIFEST.exists():
-            for line in MANIFEST.read_text().splitlines():
-                e = json.loads(line)
-                self.done.add((e["lineage"], e["kind"]))
-        self.projects, self.contents = {}, []
 
     @staticmethod
     def b64(s):
@@ -69,14 +74,13 @@ class Crawler:
         self.ensure_chrome()
         async with async_playwright() as pw:
             browser = await pw.chromium.connect_over_cdp(f"http://127.0.0.1:{self.cdp_port}")
-            ctx = browser.contexts[0]
-            self.page = await ctx.new_page()
+            self.page = await browser.contexts[0].new_page()
             self.page.on("response", self.on_response)
-            await self.goto(f"{self.hub_url}/g/all_projects/active")
-            await asyncio.sleep(8)
-            projects = sorted(self.projects.values(), key=lambda p: p["name"].lower())
-            print(f"{len(projects)} projects found")
             try:
+                await self.goto(f"{self.hub_url}/g/all_projects/active")
+                await asyncio.sleep(8)
+                projects = sorted(self.projects.values(), key=lambda p: p["name"].lower())
+                print(f"{len(projects)} projects found")
                 for p in projects:
                     if self.only_project and p["name"] != self.only_project:
                         continue
@@ -84,9 +88,17 @@ class Crawler:
                     await self.walk(p, p["data"]["urn"], [])
                     if self.capped():
                         break
+                if self.failed:
+                    print(f"== retrying {len(self.failed)} failed documents")
+                    retry, self.failed = self.failed, []
+                    for args in retry:
+                        await self.export_logged(*args)
+                if self.verify:
+                    self.find_extra()
             finally:
+                self.summary()
                 await self.page.close()
-        print(f"done, {self.exported} documents exported this run")
+        return 1 if self.verify and (self.issues["missing"] or self.issues["outdated"]) else 0
 
     def capped(self):
         return self.limit is not None and self.exported >= self.limit
@@ -116,22 +128,47 @@ class Crawler:
             print(f"  WARNING: listed {len(files) + len(folders)} of {total} entries")
         return list(folders.values()), list(files.values())
 
+    def status(self, project, path, f, fstem, kind):
+        """current, pending (requested, file not here yet), missing or outdated (design changed since export)."""
+        req = self.requests.get((f["id"], kind))
+        file = existing(project, path, fstem, kind)
+        if file:
+            self.found.add(file)
+        ref = req["requested"] if req else None
+        basis = ref or (file.stat().st_mtime if file else None)  # time of the version we have or asked for
+        if basis is None or f.get("modified", {}).get("on", 0) / 1000 > basis:
+            return "outdated" if file else "missing"
+        if file and (ref is None or file.stat().st_mtime >= ref):
+            return "current"
+        return "pending" if time.time() - ref < self.retry_after else "missing"
+
     async def walk(self, p, folder_urn, path):
         folders, files = await self.list_folder(p["id"], folder_urn)
         print(f"  [{'/'.join(path) or '/'}] {len(folders)} folders, {len(files)} files")
+        designs = [f for f in files if f.get("mimeType") == self.fusion_mime]
         for f in files:
+            if f not in designs:
+                print(f"  skip (not a Fusion design): {'/'.join(path + [f['name']])} [{f.get('fileType')}]")
+        names = Counter(f["name"].casefold() for f in designs)
+        for n, c in names.items():
+            if c > 1:
+                self.issues["collision"].append(f"{p['name']}/{'/'.join(path + [n])} ({c} designs, files get an id suffix)")
+        for f in designs:
             if self.capped():
                 return
-            if f.get("mimeType") != self.fusion_mime:
-                print(f"  skip (not a Fusion design): {'/'.join(path + [f['name']])} [{f.get('fileType')}]")
+            fstem = stem(f["name"], f["id"], names[f["name"].casefold()] > 1)
+            label = f"{p['name']}/{'/'.join(path + [f['name']])}"
+            todo = []
+            for kind in self.kinds:
+                s = self.status(p["name"], path, f, fstem, kind)
+                self.states[s] += 1
+                if s != "current":
+                    self.issues[s].append(f"{label} [{kind}]")
+                if s in ("missing", "outdated"):
+                    todo.append(kind)
+            if self.verify or not todo:
                 continue
-            kinds = [k for k in self.kinds if (f["id"], k) not in self.done]
-            if not kinds:
-                continue
-            try:
-                await self.export(p, folder_urn, path, f, kinds)
-            except Exception as e:  # keep a long run going; a rerun retries the missing formats
-                print(f"    FAILED: {str(e).splitlines()[0]}")
+            await self.export_logged(p, folder_urn, path, f, fstem, todo)
             self.exported += 1
             await self.sleep(self.item_pause)
         for sub in folders:
@@ -140,40 +177,100 @@ class Crawler:
             await self.sleep()
             await self.walk(p, sub["id"], path + [sub["name"]])
 
+    async def export_logged(self, p, folder_urn, path, f, fstem, kinds):
+        """Export, but record a failure (with screenshot) instead of stopping the run."""
+        try:
+            await self.export(p, folder_urn, path, f, kinds)
+        except Exception as e:
+            reason = str(e).splitlines()[0]
+            print(f"    FAILED: {reason}")
+            self.logs.mkdir(exist_ok=True)
+            try:
+                await self.page.screenshot(path=self.logs / f"{safe(p['name'])}_{safe(fstem)}.png")
+            except Exception:
+                pass
+            self.failed.append((p, folder_urn, path, f, fstem, kinds, reason))
+
     async def export(self, p, folder_urn, path, f, kinds):
+        """Request each format in kinds; requested ones are removed from kinds, so a retry only does the rest."""
         print(f"  export {'/'.join(path + [f['name']])} -> {kinds}")
         await self.goto(f"{self.hub_url}/g/projects/{p['id']}/data/{self.b64(folder_urn)}/{self.b64(f['id'])}/overview")
         trigger = self.page.locator("[it-id=export-dropdown-trigger]").locator("visible=true")
-        await trigger.wait_for(timeout=60000)
+        try:
+            await trigger.wait_for(timeout=60000)
+        except PlaywrightTimeout:
+            raise RuntimeError("Export button did not appear within 60 s") from None
         await self.sleep()
-        for kind in kinds:
+        for kind in list(kinds):
             await trigger.click()
             await self.sleep()
             option = self.page.locator(".export-format").locator("visible=true").filter(has_text=self.formats[kind]).first
             if await option.locator(".disabled").count():
                 print(f"    {kind}: format disabled, skipped")
                 await self.page.keyboard.press("Escape")
+                kinds.remove(kind)
                 continue
             await option.click()
             ok = self.page.locator("[it-id=alert-confirm]").locator("visible=true")
-            await ok.wait_for(timeout=30000)
+            try:
+                await ok.wait_for(timeout=30000)
+            except PlaywrightTimeout:
+                raise RuntimeError(f"{kind}: confirmation dialog did not appear within 30 s") from None
             msg = " ".join((await self.page.locator(".modal-body").locator("visible=true").inner_text()).split())
-            print(f"    {kind}: {msg[:90]}")
+            m = self.confirmation.fullmatch(msg)
+            if m and m.group(1) == f["name"]:
+                print(f"    {kind}: Download requested.")
+            else:
+                print(f"    {kind}: ERROR: {msg}")
+                self.errors.append(f"{p['name']}/{'/'.join(path + [f['name']])} [{kind}]: {msg}")
             await self.sleep()
             await ok.click()
+            entry = {"lineage": f["id"], "kind": kind, "project": p["name"], "path": path, "name": f["name"],
+                     "requested": time.time(), "message": msg}
             with MANIFEST.open("a") as fh:
-                fh.write(json.dumps({"lineage": f["id"], "kind": kind, "project": p["name"], "path": path,
-                                     "name": f["name"], "requested": time.time(), "message": msg},
-                                    ensure_ascii=False) + "\n")
-            self.done.add((f["id"], kind))
+                fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            self.requests[(f["id"], kind)] = entry
+            kinds.remove(kind)
             await self.sleep()
+
+    def find_extra(self):
+        """Files in export/ of the verified formats that belong to no online design."""
+        root = EXPORT / safe(self.only_project) if self.only_project else EXPORT
+        exts = {ext for ext, kinds in KIND.items() if kinds & set(self.kinds) and ext != ".zip"}
+        zips = tuple(f".{k}.zip" for k in self.kinds)
+        for p in sorted(root.rglob("*")):
+            if p.is_file() and UNMATCHED not in p.parents and p not in self.found \
+                    and (p.suffix.lower() in exts or p.name.lower().endswith(zips)):
+                self.issues["extra"].append(str(p.relative_to(EXPORT)))
+
+    def summary(self):
+        s = self.states
+        print(f"\n== summary: {s['current']} current, {s['pending']} pending (requested < "
+              f"{self.retry_after // 3600} h ago, no file yet), {s['missing']} missing, {s['outdated']} outdated"
+              + ("" if self.verify else f"; {self.exported} documents exported, {len(self.failed)} failed"))
+        lists = [("FAILED (rerun to retry)", [f"{p['name']}/{'/'.join(path + [f['name']])} {kinds}: {reason}"
+                                              for p, _, path, f, _, kinds, reason in self.failed]),
+                 ("UNEXPECTED DIALOG TEXT", self.errors)]
+        if self.verify:
+            lists += [("MISSING", self.issues["missing"]), ("OUTDATED (changed online since export)",
+                      self.issues["outdated"]), ("PENDING (requested, no file yet)", self.issues["pending"]),
+                      ("EXTRA (in export/, not online)", self.issues["extra"]),
+                      ("SAME NAME IN ONE FOLDER", self.issues["collision"])]
+        for title, items in lists:
+            if items:
+                print(f"{title}:" + "".join(f"\n  {i}" for i in items))
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("-n", "--limit", type=int, help="export at most N documents this run")
     ap.add_argument("-p", "--project", help="only this project (exact name)")
-    ap.add_argument("-f", "--formats", nargs="+", choices=[*Crawler.formats, "all"], default=["archive", "step"],
+    choices = [*Crawler.formats, "all"]
+    ap.add_argument("-f", "--formats", nargs="+", choices=choices, default=["archive", "step"],
                     help="formats to export, or 'all' (default: archive step)")
+    ap.add_argument("-v", "--verify", nargs="+", choices=choices, metavar="FORMAT",
+                    help="only compare these formats online vs export/, click nothing")
     a = ap.parse_args()
-    asyncio.run(Crawler(a.limit, a.project, list(Crawler.formats) if "all" in a.formats else a.formats).run())
+    fmts = a.verify or a.formats
+    kinds = list(Crawler.formats) if "all" in fmts else fmts
+    sys.exit(asyncio.run(Crawler(a.limit, a.project, kinds, bool(a.verify)).run()))
