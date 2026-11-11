@@ -82,7 +82,11 @@ class Crawler:
             self.page.on("response", self.on_response)
             try:
                 await self.goto(f"{self.hub_url}/g/all_projects/active")
-                await asyncio.sleep(8)
+                for _ in range(60):  # the project list arrives a few seconds after the page
+                    n = len(self.projects)
+                    await asyncio.sleep(3)
+                    if n and n == len(self.projects):
+                        break
                 projects = sorted(self.projects.values(), key=lambda p: p["name"].lower())
                 print(f"{len(projects)} projects found")
                 for p in self.pick(projects):
@@ -159,15 +163,21 @@ class Crawler:
             return "current"
         return "pending" if time.time() - ref < self.retry_after else "missing"
 
+    def applicable(self, f, ftype):
+        """Kinds selected with -f that this file supports."""
+        if f.get("mimeType") == self.fusion_mime:
+            return [k for k in self.kinds if k not in self.direct]
+        if ftype == "f2d":  # drawings only offer Fusion Archive (DWG/PDF need a paid plan)
+            return [k for k in self.kinds if k == "archive"]
+        return [ftype] if ftype in self.direct and ftype in self.kinds else []
+
     async def walk(self, p, folder_urn, path):
         folders, files = await self.list_folder(p["id"], folder_urn)
         print(f"  [{'/'.join(path) or '/'}] {len(folders)} folders, {len(files)} files")
         handled = []  # (file, kinds that apply to it, name stem)
         for f in files:
             ftype = (f.get("fileType") or "").lower()
-            kinds = [k for k in self.kinds if k not in self.direct] if f.get("mimeType") == self.fusion_mime \
-                else [ftype] if ftype in self.direct and ftype in self.kinds else []
-            if kinds:
+            if kinds := self.applicable(f, ftype):
                 handled.append((f, kinds, re.sub(rf"\.{ftype}$", "", f["name"], flags=re.I) if ftype in self.direct else f["name"]))
             else:
                 print(f"  skip: {'/'.join(path + [f['name']])} [{ftype}]")

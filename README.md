@@ -38,7 +38,7 @@ Formats for `-f` (several can be given, separated by spaces):
 
 | `-f` name  | Export menu entry | Email file matched by           |
 |------------|-------------------|---------------------------------|
-| `archive`  | Fusion Archive    | `.f3d`, `.f3z`                  |
+| `archive`  | Fusion Archive (designs and drawings) | `.f3d`, `.f3z`, `.f2d` |
 | `inventor` | Inventor 2025     | `.ipt`, `.iam`, `.zip`          |
 | `smt`      | SMT               | `.smt`                          |
 | `step`     | STEP              | `.stp`, `.step`                 |
