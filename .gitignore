@@ -1,0 +1,12 @@
+# browser logins (cookies, session tokens)
+chrome_profile/
+browser_profile/
+
+# personal data: emails with download links, exported files, crawl state
+emails/
+export/
+manifest.jsonl
+downloads.json
+
+__pycache__/
+.DS_Store
